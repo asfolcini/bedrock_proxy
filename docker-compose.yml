@@ -1,0 +1,11 @@
+services:
+  bedrock-proxy:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - AWS_REGION=eu-south-1
+      - PYTHONUNBUFFERED=1
+    restart: always
