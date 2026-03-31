@@ -23,20 +23,42 @@ bedrock_runtime = boto3.client(service_name='bedrock-runtime', region_name=AWS_R
 
 def normalize_messages(body: Dict[str, Any]) -> tuple:
     model_id = body.get("model", "qwen.qwen3-coder-30b-a3b-v1:0")
-    raw = body.get("messages", []) or ([{"role": "user", "content": body["prompt"]}] if "prompt" in body else [])
+    
+    # Responses API usa "input", Chat Completions usa "messages"
+    raw = body.get("messages") or body.get("input") or []
+    
+    # input può essere una stringa semplice
+    if isinstance(raw, str):
+        raw = [{"role": "user", "content": raw}]
+    
+    if not raw and "prompt" in body:
+        raw = [{"role": "user", "content": body["prompt"]}]
+
     system_prompts, temp = [], []
     for m in raw:
-        role, content = str(m.get("role", "user")).lower(), m.get("content", "")
-        if role == "system": system_prompts.append({"text": content})
-        else: temp.append({"role": role if role in ["user", "assistant"] else "user", "content": [{"text": content}]})
-    while temp and temp[0]["role"] != "user": temp.pop(0)
+        role = str(m.get("role", "user")).lower()
+        content = m.get("content", "")
+        if isinstance(content, list):  # content può essere array di oggetti
+            content = " ".join(c.get("text", "") for c in content if isinstance(c, dict))
+        if role == "system":
+            system_prompts.append({"text": content})
+        else:
+            temp.append({"role": role if role in ["user", "assistant"] else "user", "content": [{"text": content}]})
+
+    while temp and temp[0]["role"] != "user":
+        temp.pop(0)
+
     final = []
     if temp:
         curr = temp[0]
         for nxt in temp[1:]:
-            if nxt["role"] == curr["role"]: curr["content"][0]["text"] += "\n" + nxt["content"][0]["text"]
-            else: final.append(curr); curr = nxt
+            if nxt["role"] == curr["role"]:
+                curr["content"][0]["text"] += "\n" + nxt["content"][0]["text"]
+            else:
+                final.append(curr)
+                curr = nxt
         final.append(curr)
+
     return model_id, system_prompts, final or [{"role": "user", "content": [{"text": "Continue"}]}]
 
 async def responses_sse_generator(model_id: str, system: List, messages: List, config: Dict) -> AsyncGenerator[str, None]:
